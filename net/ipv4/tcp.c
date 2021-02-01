@@ -459,9 +459,11 @@ unsigned int tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
 
 	sock_rps_record_flow(sk);
 
+    // 执行相关回调
 	sock_poll_wait(file, sk_sleep(sk), wait);
 
 	state = sk_state_load(sk);
+    // 如果是LISTEN状态
 	if (state == TCP_LISTEN)
 		return inet_csk_listen_poll(sk);
 

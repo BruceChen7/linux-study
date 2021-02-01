@@ -1910,6 +1910,7 @@ static inline void sock_poll_wait(struct file *filp,
 		wait_queue_head_t *wait_address, poll_table *p)
 {
 	if (!poll_does_not_wait(p) && wait_address) {
+        // 执行相关回调
 		poll_wait(filp, wait_address, p);
 		/* We need to be sure we are in sync with the
 		 * socket flags modification.

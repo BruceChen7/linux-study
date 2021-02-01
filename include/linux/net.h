@@ -108,6 +108,7 @@ struct socket_wq {
  *  @sk: internal networking protocol agnostic socket representation
  *  @wq: wait queue for several uses
  */
+//
 struct socket {
 	socket_state		state;
 

@@ -1007,6 +1007,7 @@ EXPORT_SYMBOL(sock_create_lite);
 static unsigned int sock_poll(struct file *file, poll_table *wait)
 {
 	unsigned int busy_flag = 0;
+    // 在include/linux.net.h
 	struct socket *sock;
 
 	/*
@@ -1014,6 +1015,7 @@ static unsigned int sock_poll(struct file *file, poll_table *wait)
 	 */
 	sock = file->private_data;
 
+    // 如果能死循环，那么直接死循环
 	if (sk_can_busy_loop(sock->sk)) {
 		/* this socket can poll_ll so tell the system call */
 		busy_flag = POLL_BUSY_LOOP;

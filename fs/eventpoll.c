@@ -289,6 +289,7 @@ static LIST_HEAD(visited_list);
  * List of files with newly added links, where we may need to limit the number
  * of emanating paths. Protected by the epmutex.
  */
+// 全局静态变量
 static LIST_HEAD(tfile_check_list);
 
 #ifdef CONFIG_SYSCTL
@@ -802,6 +803,7 @@ static inline unsigned int ep_item_poll(struct epitem *epi, poll_table *pt)
 {
 	pt->_key = epi->event.events;
 
+    // 执行对应epi对应的poll函数
 	return epi->ffd.file->f_op->poll(epi->ffd.file, pt) & epi->event.events;
 }
 
@@ -849,6 +851,7 @@ static int ep_poll_readyevents_proc(void *priv, void *cookie, int call_nests)
 static unsigned int ep_eventpoll_poll(struct file *file, poll_table *wait)
 {
 	int pollflags;
+    // 获取epoll对应的实例
 	struct eventpoll *ep = file->private_data;
 	struct readyevents_arg arg;
 
@@ -859,7 +862,9 @@ static unsigned int ep_eventpoll_poll(struct file *file, poll_table *wait)
 	arg.locked = wait && (wait->_qproc == ep_ptable_queue_proc);
 	arg.ep = ep;
 
+    // 在include/linux/poll.h
 	/* Insert inside our poll wait queue */
+    // 执行回调
 	poll_wait(file, &ep->poll_wait, wait);
 
 	/*
@@ -1118,6 +1123,7 @@ static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 	struct eppoll_entry *pwq;
 
 	if (epi->nwait >= 0 && (pwq = kmem_cache_alloc(pwq_cache, GFP_KERNEL))) {
+        // 初始化entry回调
 		init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
 		pwq->whead = whead;
 		pwq->base = epi;
@@ -1302,14 +1308,17 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	user_watches = atomic_long_read(&ep->user->epoll_watches);
 	if (unlikely(user_watches >= max_user_watches))
 		return -ENOSPC;
+    // 分配一个epi
 	if (!(epi = kmem_cache_alloc(epi_cache, GFP_KERNEL)))
 		return -ENOMEM;
 
 	/* Item initialization follow here ... */
+    // 初始化相关链表信息
 	INIT_LIST_HEAD(&epi->rdllink);
 	INIT_LIST_HEAD(&epi->fllink);
 	INIT_LIST_HEAD(&epi->pwqlist);
 	epi->ep = ep;
+    // 设置struct epoll_filefd
 	ep_set_ffd(&epi->ffd, tfile, fd);
 	epi->event = *event;
 	epi->nwait = 0;
@@ -1324,6 +1333,7 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 
 	/* Initialize the poll table using the queue callback */
 	epq.epi = epi;
+    //  初始化睡眠回调
 	init_poll_funcptr(&epq.pt, ep_ptable_queue_proc);
 
 	/*
@@ -1353,6 +1363,7 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	 * Add the current item to the RB tree. All RB tree operations are
 	 * protected by "mtx", and ep_insert() is called with "mtx" held.
 	 */
+    // 插入到rbtree
 	ep_rbtree_insert(ep, epi);
 
 	/* now check if we've created too many backpaths */
@@ -1620,6 +1631,7 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
 	wait_queue_t wait;
 	ktime_t expires, *to = NULL;
 
+    // 有超时时间
 	if (timeout > 0) {
 		struct timespec64 end_time = ep_set_mstimeout(timeout);
 
@@ -1804,6 +1816,7 @@ SYSCALL_DEFINE1(epoll_create1, int, flags)
 	/*
 	 * Create the internal data structure ("struct eventpoll").
 	 */
+    //  分配内存空间，并初始化结构  ：w
 	error = ep_alloc(&ep);
 	if (error < 0)
 		return error;
@@ -1816,6 +1829,8 @@ SYSCALL_DEFINE1(epoll_create1, int, flags)
 		error = fd;
 		goto out_free_ep;
 	}
+    // eventpoll对应的文件句柄
+    // 注意这里的ep_eventpoll_poll的实现
 	file = anon_inode_getfile("[eventpoll]", &eventpoll_fops, ep,
 				 O_RDWR | (flags & O_CLOEXEC));
 	if (IS_ERR(file)) {
@@ -1851,6 +1866,11 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 {
 	int error;
 	int full_check = 0;
+
+//    struct fd {
+//        struct file *file;
+//        unsigned int flags;
+//    };
 	struct fd f, tf;
 	struct eventpoll *ep;
 	struct epitem *epi;
@@ -1858,22 +1878,26 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	struct eventpoll *tep = NULL;
 
 	error = -EFAULT;
+    // 不是del操作
 	if (ep_op_has_event(op) &&
 	    copy_from_user(&epds, event, sizeof(struct epoll_event)))
 		goto error_return;
 
 	error = -EBADF;
 	f = fdget(epfd);
+    //  如果没有对应的文件操作callback
 	if (!f.file)
 		goto error_return;
 
 	/* Get the "struct file *" for the target file */
+    // 找到对应target fd
 	tf = fdget(fd);
 	if (!tf.file)
 		goto error_fput;
 
 	/* The target file descriptor must support poll */
 	error = -EPERM;
+    //  必须支持poll方法
 	if (!tf.file->f_op->poll)
 		goto error_tgt_fput;
 
@@ -1907,6 +1931,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	 * At this point it is safe to assume that the "private_data" contains
 	 * our own data structure.
 	 */
+    // 获取eventpoll实例
 	ep = f.file->private_data;
 
 	/*
@@ -1931,6 +1956,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 			full_check = 1;
 			mutex_unlock(&ep->mtx);
 			mutex_lock(&epmutex);
+            //是epoll fd
 			if (is_file_epoll(tf.file)) {
 				error = -ELOOP;
 				if (ep_loop_check(ep, tf.file) != 0) {
@@ -1938,6 +1964,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 					goto error_tgt_fput;
 				}
 			} else
+                // 添加到链表中
 				list_add(&tf.file->f_tfile_llink,
 							&tfile_check_list);
 			mutex_lock_nested(&ep->mtx, 0);
@@ -1953,6 +1980,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	 * above, we can be sure to be able to use the item looked up by
 	 * ep_find() till we release the mutex.
 	 */
+    // 从红黑树中找到对应的epi
 	epi = ep_find(ep, tf.file, fd);
 
 	error = -EINVAL;

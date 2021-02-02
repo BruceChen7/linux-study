@@ -269,12 +269,13 @@ extern void init_wait_entry(wait_queue_t *__wait, int flags);
 	long __ret = ret;	/* explicit shadow */			\
 									\
 	init_wait_entry(&__wait, exclusive ? WQ_FLAG_EXCLUSIVE : 0);	\
-	for (;;) {							\
+	for (;;) {							\                       \
 		long __int = prepare_to_wait_event(&wq, &__wait, state);\
 									\
 		if (condition)						\
 			break;						\
 									\
+                                    \
 		if (___wait_is_interruptible(state) && __int) {		\
 			__ret = __int;					\
 			goto __out;					\
@@ -302,6 +303,9 @@ __out:	__ret;								\
  * wake_up() has to be called after changing any variable that could
  * change the result of the wait condition.
  */
+// 等待条件为真,进入睡眠状态
+// 进入睡眠状态直到condition为true，在等待期进程状态为TASK_UNINTERRUPTIBLE。
+// 对应的唤醒方法是wake_up()，当等待队列wq被唤醒时会执行如下两个检测：
 #define wait_event(wq, condition)					\
 do {									\
 	might_sleep();							\

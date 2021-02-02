@@ -382,6 +382,7 @@ static void ep_nested_calls_init(struct nested_calls *ncalls)
  */
 static inline int ep_events_available(struct eventpoll *ep)
 {
+    // rdlist中不为空
 	return !list_empty(&ep->rdllist) || ep->ovflist != EP_UNACTIVE_PTR;
 }
 
@@ -629,6 +630,7 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 	/*
 	 * Now call the callback function.
 	 */
+    // 调用相关回调
 	error = (*sproc)(ep, &txlist, priv);
 
 	spin_lock_irqsave(&ep->lock, flags);
@@ -1042,6 +1044,7 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 	 * callback. We need to be able to handle both cases here, hence the
 	 * test for "key" != NULL before the event match test.
 	 */
+    // 如果发生的事件不关心，那么直接返回
 	if (key && !((unsigned long) key & epi->event.events))
 		goto out_unlock;
 
@@ -1068,6 +1071,7 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 	}
 
 	/* If this file is already in the ready list we exit soon */
+    // 将实际发生的事件epitem加入到就绪列列表中
 	if (!ep_is_linked(&epi->rdllink)) {
 		list_add_tail(&epi->rdllink, &ep->rdllist);
 		ep_pm_stay_awake_rcu(epi);
@@ -1077,12 +1081,15 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 	 * Wake up ( if active ) both the eventpoll wait list and the ->poll()
 	 * wait list.
 	 */
+    // 既然“就绪链表”中有了新成员，则唤醒阻塞在epoll_wait系统调用的task去处理。
+    // 注意，如果本来epi已经在“就绪队列”了，这里依然会唤醒并处理的。
 	if (waitqueue_active(&ep->wq)) {
 		if ((epi->event.events & EPOLLEXCLUSIVE) &&
 					!((unsigned long)key & POLLFREE)) {
 			switch ((unsigned long)key & EPOLLINOUT_BITS) {
 			case POLLIN:
 				if (epi->event.events & POLLIN)
+                    // 唤醒
 					ewake = 1;
 				break;
 			case POLLOUT:
@@ -1094,6 +1101,7 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 				break;
 			}
 		}
+        // 唤醒阻塞的进程来处理
 		wake_up_locked(&ep->wq);
 	}
 	if (waitqueue_active(&ep->poll_wait))
@@ -1127,6 +1135,7 @@ static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 		init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
 		pwq->whead = whead;
 		pwq->base = epi;
+        // 加入到等待列表
 		if (epi->event.events & EPOLLEXCLUSIVE)
 			add_wait_queue_exclusive(whead, &pwq->wait);
 		else
@@ -1343,6 +1352,9 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	 * this operation completes, the poll callback can start hitting
 	 * the new item.
 	 */
+    // 对于socket而言，调用的是
+    // net/ipv4/tcp.c中的tcp_poll.c中tcp_poll
+    // tcp_poll将会执行sock_poll_wait
 	revents = ep_item_poll(epi, &epq.pt);
 
 	/*
@@ -1543,6 +1555,10 @@ static int ep_send_events_proc(struct eventpoll *ep, struct list_head *head,
 
 		list_del_init(&epi->rdllink);
 
+
+
+        // 实际获取具体的事件。
+        // 注意，睡眠entry的回调函数只是通知有“事件”，具体需要每一个文件句柄的特定poll回调来获取。
 		revents = ep_item_poll(epi, &pt);
 
 		/*
@@ -1552,8 +1568,10 @@ static int ep_send_events_proc(struct eventpoll *ep, struct list_head *head,
 		 * can change the item.
 		 */
 		if (revents) {
+            // 给用户失败，那么z直接诶返回
 			if (__put_user(revents, &uevent->events) ||
 			    __put_user(epi->event.data, &uevent->data)) {
+                // 如果没有完成，将epi重新加回就绪链表
 				list_add(&epi->rdllink, head);
 				ep_pm_stay_awake(epi);
 				return eventcnt ? eventcnt : -EFAULT;
@@ -1562,7 +1580,7 @@ static int ep_send_events_proc(struct eventpoll *ep, struct list_head *head,
 			uevent++;
 			if (epi->event.events & EPOLLONESHOT)
 				epi->event.events &= EP_PRIVATE_BITS;
-			else if (!(epi->event.events & EPOLLET)) {
+			else if (!(epi->event.events & EPOLLET)) { // 如果是LT模式，重新加会就绪列表，等待下次poll
 				/*
 				 * If this file has been added with Level
 				 * Trigger mode, we need to insert back inside
@@ -1591,6 +1609,7 @@ static int ep_send_events(struct eventpoll *ep,
 	esed.maxevents = maxevents;
 	esed.events = events;
 
+    // 上报给用户态
 	return ep_scan_ready_list(ep, ep_send_events_proc, &esed, 0, false);
 }
 
@@ -1657,6 +1676,7 @@ fetch_events:
 		 * We need to sleep here, and we will be wake up by
 		 * ep_poll_callback() when events will become available.
 		 */
+        // 使用默认的唤醒机制
 		init_waitqueue_entry(&wait, current);
 		__add_wait_queue_exclusive(&ep->wq, &wait);
 
@@ -1675,12 +1695,14 @@ fetch_events:
 			}
 
 			spin_unlock_irqrestore(&ep->lock, flags);
+            // 超时唤醒
 			if (!schedule_hrtimeout_range(to, slack, HRTIMER_MODE_ABS))
 				timed_out = 1;
 
 			spin_lock_irqsave(&ep->lock, flags);
 		}
 
+        // 从等对队列中删除
 		__remove_wait_queue(&ep->wq, &wait);
 		__set_current_state(TASK_RUNNING);
 	}
@@ -1697,6 +1719,7 @@ check_events:
 	 */
 	if (!res && eavail &&
 	    !(res = ep_send_events(ep, events, maxevents)) && !timed_out)
+        // goto fetch_events 后能能再次执行check_events
 		goto fetch_events;
 
 	return res;
